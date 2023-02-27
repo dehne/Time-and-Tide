@@ -18,7 +18,7 @@
  * 
  * Because tides usually don't occur regularly every six hours, the clock can't simply count off standard 
  * hours. Over the years, various methods have been employed to make tide clocks show more or less the 
- * correct number of hours to the next tide. Most commonly, they're set to run so that the hiand makes a 
+ * correct number of hours to the next tide. Most commonly, they're set to run so that the hand makes a 
  * complete trip around the dial every 12 hours and 50 minutes, which is close to the average time it takes 
  * for the moon to cross the same line of longitude on successive days. That's approximately okay if you 
  * live where the tides more or less follow that pattern (e.g., the eastern seaboard of the US), but it's 
@@ -35,15 +35,15 @@
  * next (low) tide is less than six hours away, the clock ticks as fast as it can until it points to the 
  * right place and then resumes moving at normal clock-speed once more. Things work exactly the same way when 
  * the clock gets to low tide: It asks the handler for the time of the next high tide and then pauses or 
- * races forward as needed.
+ * races forward as needed before beginning once again to run normally.
  * 
  * The second face design, called the nonlinear design, also shows the correct time to the next tide, but 
  * does so in a different way. Instead of showing six hours between tides, it shows 18. But the spacing is 
- * very nonlinear. When it's a long time to the next tide, the distance the hand travels is very small. As 
- * the time to the next tide gets closer, the distance the hand travels to mark a unit of passing time 
- * gradually increases. When it gets to the next tide, it uses the "get next tide" handler to figure out 
- * how much time there is until the next tide and pauses (hardly ever) or zips forward until the hand points 
- * to the correct plaace. From there, it resumes moving, but nonlinearly, of course.
+ * very nonlinear. When it's a long time to the next tide, the speed at which the hand travels is very low. 
+ * As the time to the next tide gets closer, the speed with which the hand travels gradually increases. When 
+ * when the high or low tide is reached, it uses the "get next tide" handler to figure out how much time 
+ * there is until the next tide and pauses (hardly ever) or zips forward until the hand points to the 
+ * correct place. From there, it resumes moving, but nonlinearly, of course.
  * 
  * With both face designs, the single hand is attached to the quartz clock mechanism's minute hand, even 
  * though it indicates hours. No hands are attached to the mechanism's other hand positions.
@@ -53,13 +53,14 @@
  * NOAA comes to mind.
  * 
  * To use the TideClock, instantiate a TideCLock object as a global variable, telling it which GPIO
- * pins the Lavet motor is connected to and what the address of the handler function is. Then in in the 
- * Arduino loop function invoke either the runLinear (if you use a linear clock face) or runNonlinear (if 
- * you use a nonlinear clock face) member functions, passing the current POSIX time. Do this at least once 
- * every twelve seconds, or more often if you don't have anyting better for the Arduino to do.
+ * pins the Lavet motor is connected to. In the Arduino setup function, use the begin member function to 
+ * tell it what the address of the handler function is and whether the clock face is linear or nonlinear. 
+ * Then in in the Arduino loop function invoke run member function, passing the current POSIX time. Do 
+ * this at least once every six seconds, or more often if you don't have anyting better for the Arduino to 
+ * do.
  * 
  * TideClock assumes that the clock's position has been set manually at the time of the first call to 
- * runLinear() or runNonlinear().
+ * run().
  *
  ****
  *

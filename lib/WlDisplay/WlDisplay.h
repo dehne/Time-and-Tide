@@ -10,18 +10,21 @@
  * land as seen from off shore, thus displaying the current water level. The display runs from 
  * minLevel (by default, WLD_MIN_LEVEL), the lowest water level it can display to maxLevel (by 
  * default WLD_MAX_LEVEL), the maximum. If requested to display a level outside this range, it 
- * ignores the request. Internally, the stepper position (in steps) corresponding to minLevel 
- * is WLD_BOTTOM_POS; maxLevel corresponds to WLD_TOP_POS.
+ * ignores the request. Internally, the stepper position (in steps) corresponding to maxLevel 
+ * corresponds to WLD_MIN_POS.
  * 
  * The stepper runs on 5V from the USB input power, the ESP32-S2 we run on has a backup battery 
- * so it can keep going if unplugged for a while. If there's no USB power, we can't move the 
- * display, of course. To detect the state of the USB power, there's a "power present" signal on
- * the GPIO pin powerPin. It's HIGH when power is present.
+ * so it can keep going if unplugged for a while. But if there's no USB power, there's no 5V 
+ * because the hardware doesn't include a boost converter, so we can't move the display. To 
+ * detect the state of the USB power, there's a "power present" signal on the GPIO pin powerPin. 
+ * It's HIGH when power is present.
  * 
- * When USB power comes up, the display has no idea where it is in the range. So, the device 
- * contains a 3144 Hall-effect sensor and magnet that mark the physical position corresponding 
- * to WLD_BOTTOM_POS. To home the device, we drive the stepper down (which, it turns out, is 
- * clockwise) until the Hall-effect sensor trips.
+ * When USB power comes up, the display has no idea where it is in its range except that the water 
+ * level is is displaying is at or above the minimum physically displayable level. To figure out 
+ * where it is, the device contains a magnet that moves as the displayed water level changes and 
+ * a 3144 Hall-effect sensor that gets near the sensor at the physical position corresponding to 
+ * the minimum displayable water level. To home the device, we drive the stepper down (which, it 
+ * turns out, is clockwise) until the Hall-effect sensor trips.
  * 
  * The typical way to use WlDisplay is to create a WlDisplay object as a global variable. Then 
  * invoke the begin member function in the Arduino setup() to do the initializaton. While running, 
@@ -99,6 +102,13 @@ public:
    * @param level The water level the display is to show
    */
   void setLevel(float level);
+
+  /**
+   * @brief Get the currently displayed water level in feet MLLW
+   * 
+   * @return float The current water level
+   */
+  float getLevel();
 
   /**
    *

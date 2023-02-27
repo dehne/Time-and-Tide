@@ -46,7 +46,7 @@ void WlDisplay::begin(float minL, float maxL) {
 }
 
 /***
- * home()
+ *  bool home()
  ***/
 bool WlDisplay::home() {
   if (digitalRead(powerPin) == HIGH) {
@@ -67,14 +67,21 @@ bool WlDisplay::home() {
  * setLevel(level)
  ***/
 void WlDisplay::setLevel(float level) {
-  level = level > maxLevel ? maxLevel : level < minLevel ? minLevel : level;
-  long target = level * stepsPerFoot;
-  if (target > minLevel * stepsPerFoot || target < WLD_MIN_POS) {
+  if (level > maxLevel || level < minLevel) {
     Serial.printf("[WlDisplay::setLevel] Ignoring out-of-range water level: %f.\n", level);
     return;
   }
+  curLevel = level;
+  long target = curLevel * stepsPerFoot;
   stepper->setTarget(target);
-  log_d("[WlDisplay::setLevel] Water level set to %f (stepper target %d).\n", level, target);
+  log_d("[WlDisplay::setLevel] Water level set to %f (stepper target %d).\n", curLevel, target);
+}
+
+/***
+ * float getLevel()
+ ***/
+float WlDisplay::getLevel() {
+  return curLevel;
 }
 
 /***

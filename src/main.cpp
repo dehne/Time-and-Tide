@@ -1,19 +1,36 @@
 /****
  * Time and Tides v0.5.0
  * 
- * This is the driver for a device with a tide clock and a water level display. It uses the 
- * noaa.gov tides and currents HTTPS GET REST api to get information about the times of for
- * high and low tides and the current water levels for a specified tide station and displays 
- * that information.
+ * This is the Arduino framework firmware for a device with a tide clock and a water level 
+ * display. It uses a WiFi connection to the internet to ask the noaa.gov tides and currents 
+ * HTTPS GET REST api for information about the times of for high and low tides and the 
+ * predicted water levels for a specified tide station and displays that information on two
+ * electromechanical displays.
  * 
- * The tide clock display is managed by the TideClock library. This library drives a hacked 
- * quartz clock movement to display how much time there is before the next high or low tide. 
- * See the library for more details.
+ * The first display is the tide clock. It is managed by the TideClock library. This library 
+ * drives a hacked quartz clock movement to display how much time there is before the next 
+ * high or low tide. See the library for more details.
  * 
- * The water level display is managed by the WlDisplay library. It drives an electro-mechanical
- * display showing what the current water level is. See the library for more details.
+ * The second display shows the current water level. It is managed by the WlDisplay library. 
+ * The library uses a small stepper motor to raise and lower the level of the "sea" in an 
+ * illustration of a seaside scene. See the library for more details.
  * 
- * This project was designed and tested to run on an Adafruit featheresp32-s2 using the Arduino 
+ * The firmware can communicate to a terminal emulator using the Arduino Serial interface over 
+ * USB. It has a command interpreter that can be used to change various runtime parameters such 
+ * as the WiFi SSID and password to use and which tidal station to show the data for, among 
+ * others. There are also various utiility commands that may be of interest. The "h" command 
+ * displays a list.
+ *  
+ * Once the configuration is set, it can be stored in non-volatile memory using the "save" 
+ * command. Once saved, the parameters are used whenever the power comes on or the device is 
+ * reset.
+ * 
+ * The hardware also has a built-in LiPo battery that lets the clock continue to run when USB 
+ * power goes away. To allow the clock to run for as long as it can, the water level display 
+ * is paused when running on battery. When USB powe is restored, it will once again display the 
+ * correct water level. The tide clock continues to run when operating on battery.
+ * 
+ * This firmware was designed and tested to run on an Adafruit featheresp32-s2 using the Arduino 
  * framework; no effort was made to make it portable.
  * 
  * The complete NOAA tides and currents api definition may be found at 
@@ -49,10 +66,11 @@
 
 // Misc constants
 #define BANNER                  F("Time and Tides v0.5.0")
-#define SECONDS_IN_NOMINAL_TIDE ((6 * 60 + 25) * 60) // Nominal time between high and low tide (sec)
-#define SECONDS_PER_DAY         (86400)              // How many seconds there are in a day
-#define MINUTES_PER_DAY         (1440)               // How many minutes there are in a day
-#define LEVEL_UNAVAILABLE       (-100.0)             // Value when water level unavailable
+#define MAX_SERIAL_READY_MILLIS (10000)               // Maximum millis to wait for Serial to become ready
+#define SECONDS_IN_NOMINAL_TIDE ((6*60+12)*60+30)     // Nominal time between high and low tide (sec)
+#define SECONDS_PER_DAY         (86400)               // How many seconds there are in a day
+#define MINUTES_PER_DAY         (1440)                // How many minutes there are in a day
+#define LEVEL_UNAVAILABLE       (-100.0)              // Value when water level unavailable
 
 // Hardware pins
 #define TICK_PIN          (11)                        // The pin to which the TideClock's tick input is attached
@@ -64,8 +82,9 @@
 #define LIMIT_PIN         (A4)                        // The pin to which the limit sensor signal is attached
 #define POWER_PIN         (A5)                        // The pin to which the "power present" signal is attached
 
-#define timeToTimeOfDayUTC(t) (uint32_t)((t) % SECONDS_PER_DAY) // Convert from time_t to seconds past midnight UTC
-#define timeToSx(t)       (sx_t)((((t) / 60) % MINUTES_PER_DAY) / 6) // Convert from time_t to sx_t
+// Some useful macros
+#define timeToTimeOfDayUTC(t) (uint32_t)((t) % SECONDS_PER_DAY)       // Convert from time_t to seconds past midnight UTC
+#define timeToSx(t)       (sx_t)((((t) / 60) % MINUTES_PER_DAY) / 6)  // Convert from time_t to sx_t
 
 // Types
 typedef uint8_t sx_t;                                 // Sample index type i.e. six minutes -- 1/10th of an hour, 1/240th of a day
@@ -77,7 +96,7 @@ struct configData_t {                                 // The shape of the data w
   float maxLevel;                                     //   The highest tide to be displayed (feet above MLLW)
   tc_scale_t clockFace;                               //   The type of clock face; linear or nonlinear
 };
-enum opMode_t : uint8_t {notInit, run, adj};          // The opMode type
+enum opMode_t : uint8_t {notInit, run, test};         // The opMode type
 
 /***
  * 
@@ -89,6 +108,7 @@ TideClock tc {TICK_PIN, TOCK_PIN};                    // The tide clock device
 WlDisplay wld {STEPPER_PIN_1, STEPPER_PIN_2, STEPPER_PIN_3, STEPPER_PIN_4, LIMIT_PIN, POWER_PIN}; // The water level display device
 UserInput ui {};                                      // User interface object -- cmd line processor
 float predWl[TAT_N_PRED_WL];                          // The today's predicted water levels, every six minutes from 00:00 to 24:00
+bool nextTideType = HIGH;                             // The next tide type; HIGH or LOW
 configData_t config;                                  // The configuration data stored in NVS
 opMode_t opMode;                                      // Whether we're running normally or doing adjustments
 
@@ -335,7 +355,6 @@ float getPredWl() {
 time_t getNextTide() {
   time_t nowSecs = time(nullptr);
   time_t answer = nowSecs + SECONDS_IN_NOMINAL_TIDE;
-  bool highTide;
   String timeStamp = toNOAAformat(nowSecs);
   String payload = getPayload(((String(TAT_SERVER_URL "?" TAT_GET_PRED_TIDES) + 
     toNOAAformat(nowSecs, true)) + String("&station=") + String(config.station)).c_str());
@@ -352,7 +371,7 @@ time_t getNextTide() {
         }
         for (uint8_t ix = 0; ix < sz; ix++) {
           answer = fromNOAAformat(predictions["predictions"][ix]["t"].as<String>());
-          highTide = predictions["predictions"][ix]["type"].as<String>().equals("H");
+          nextTideType = predictions["predictions"][ix]["type"].as<String>().equals("H");
           if (answer > nowSecs) {
             break;
           }
@@ -373,7 +392,7 @@ time_t getNextTide() {
   }
   uint32_t fromNow = (uint32_t)(answer - nowSecs);
   Serial.printf("[getNextTide %s] Next tide (%s) is %02d:%02d:%02d from now at %s\n", 
-    timeStamp.c_str(), highTide ? "High" : "Low", fromNow / 3600, (fromNow % 3600) / 60, fromNow % 60, toNOAAformat(answer).c_str());
+    timeStamp.c_str(), nextTideType ? "High" : "Low", fromNow / 3600, (fromNow % 3600) / 60, fromNow % 60, toNOAAformat(answer).c_str());
   return answer;
 }
 
@@ -500,59 +519,63 @@ bool getConfig() {
  }
 
 /**
- * @brief Handler for unrecognized user commands.
+ * @brief The handler for unrecognized user commands.
  */
 void onCmdUnrecognized() {
   Serial.printf("Command %s not recognized.\n", ui.getWord(0).c_str());
 }
 
 /**
- * @brief Handler for the "help" and "h" commands
+ * @brief The "help" and "h" command handler. Print a summary of the available commands.
  */
 void onHelp() {
   Serial.print(
-    "help | h                   Print this summary of the commands.\n"
-    "mode run | adj             Set the operating mode: run normally or enter adjustment mode.\n"
-    "setwl <float>              In adj mode, set the water level display to show the givel level (ft MLLW)\n"
-    "tide                       Print the time to the next high or low tide\n"
-    "config                     Print the current configuration parameters\n"
-    "config ssid  <string>      Set the WiFi ssid to use to <string>\n"
-    "config pw <string>         Set the WiFi password to use to <string>\n"
-    "config station <7 digits>  Set the 7-digit NOAA station ID\n"
-    "config minlevel <float>    Set the minimum displayable water level (ft MLLW)\n"
-    "config maxlevel <float>    Set the maximum displayable water level (ft MLLW)\n"
-    "config face linear         Set the type of clock face being used to linear\n"
-    "config face nonlinear      Ser the type of clock face being used to nonlinear\n"
-    "save                       Save the current configuration in NVS\n"
-    "reset                      Restart things using the configuration stored in NVS\n");
+    "help | h                       Print this summary of the commands.\n"
+    "mode run | test                Set the operating mode: run normally or enter test mode.\n"
+    "setwl <float>                  In test mode, set the displayed water level (ft MLLW)\n"
+    "tide                           Print information about the next high or low tide\n"
+    "wl                             Print information about the current water level\n"
+    "config                         Print the current configuration\n"
+    "config ssid  <string>          Set the WiFi ssid to use to <string>\n"
+    "config pw <string>             Set the WiFi password to use to <string>\n"
+    "config station <7 digits>      Set the 7-digit NOAA station ID\n"
+    "config minlevel <float>        Set the minimum displayable water level (ft MLLW)\n"
+    "config maxlevel <float>        Set the maximum displayable water level (ft MLLW)\n"
+    "config face linear | nonlinear Set the type of clock face being used\n"
+    "save                           Save the current configuration\n"
+    "restart                        Restart things using the saved configuration\n");
 }
 
 /**
- * @brief The "mode" command handler set the mode either to "run" or "adj." During run mode, the
- *        clock and the tide display run normally, during adj mode, the tide level display is
- *        paused and the setwl command can be used to show what different water levels will
- *        look like.
+ * @brief The mode command handler. Set the mode either to "run" or "test." During run mode, 
+ *        the clock and the tide display run normally, during test mode, the tide level 
+ *        display is paused and the setwl command can be used to show what different water 
+ *        levels will look like.
  */
 void onMode() {
+  if (opMode == notInit) {
+    Serial.print("Initialization didn\'t succeed; can\'t change mode.\n");
+    return;
+  }
   String modeName = ui.getWord(1);
   if (modeName.equalsIgnoreCase("run")) {
     opMode = run;
     Serial.print(F("Run mode.\n"));
-  } else if (modeName.equalsIgnoreCase("adj")) {
-    Serial.print(F("Adjustment mode. Water level display not running.\n"));
-    opMode = adj;
+  } else if (modeName.equalsIgnoreCase("test")) {
+    Serial.print(F("Test mode. Water level display not running.\n"));
+    opMode = test;
   } else {
     Serial.printf("Unrecognized mode: %s.\n", ui.getWord(1).c_str());
   }
 }
 
 /**
- * @brief setwl command handler. Set the water level display to show the given value 
- *        (in feet above/below MLLW)
+ * @brief The setwl command handler. Set the water level display to show the 
+ *        given value (in feet above/below MLLW)
  */
 void onSetWl() {
-  if (opMode != adj) {
-    Serial.print(F("setwl command only active in adj mode.\n"));
+  if (opMode != test) {
+    Serial.print(F("setwl command only active in test mode.\n"));
     return;
   }
   float wl = ui.getWord(1).toFloat();
@@ -561,7 +584,7 @@ void onSetWl() {
 }
 
 /**
- * @brief Display how much time there is to the next tide
+ * @brief The tide command handler. Display information related to the next tide
  */
 void onTide() {
   time_t nextTide = tc.getNextTide();
@@ -571,12 +594,24 @@ void onTide() {
     Serial.print(" No next tide has been set yet.\n");
     return;
   }
-  Serial.printf("The next tide extreme is at %s, %d seconds from now.\n",
-    toHhmmss(nextTide).c_str(), static_cast<int32_t>(nextTide) - static_cast<int32_t>(t));
+  int32_t secToNextTide = static_cast<int32_t>(nextTide) - static_cast<int32_t>(t);
+  Serial.printf("The next tide (%s) is at %s, %s (%d seconds) from now.\n",
+    nextTideType ? "High" : "Low", toHhmmss(nextTide).c_str(), toHhmmss(secToNextTide).c_str(), secToNextTide);
 }
 
 /**
- * @brief config command handler. Set and display the available configuration variables.
+ * @brief The wl command handler. Display information about the current water level
+ * 
+ */
+void onWl() {
+  time_t t = time(nullptr);
+  Serial.printf("It is now %s UTC. The water level currently displayed is %f feet MLLW.\n", 
+    toHhmmss(t).c_str(), wld.getLevel());
+}
+
+/**
+ * @brief The config command handler. Set and display the available configuration 
+ *        variables.
  */
 void onConfig() {
   String subCmd = ui.getWord(1);
@@ -634,7 +669,7 @@ void onConfig() {
 }
 
 /**
- * @brief save command handler. Save the current configuration in NVS
+ * @brief The save command handler. Save the current configuration in NVS
  * 
  */
 void onSave() {
@@ -643,10 +678,10 @@ void onSave() {
   }
 }
 /**
- * @brief reset command handler. Cause a software reset, restarting things with the
- *        configuration in NVS.
+ * @brief The restart command handler. Cause a software reset, restarting 
+ *        things with the stored configuration.
  */
-void onReset() {
+void onRestart() {
   ESP.restart();
 }
 
@@ -656,9 +691,12 @@ void onReset() {
 void setup() {
   Serial.begin(9600);
   pinMode(LED_BUILTIN, OUTPUT);
+  unsigned long startMillis = millis();
+  unsigned long curMillis;
   do {
     blinkLED();
-  } while (!Serial);
+    curMillis = millis();
+  } while (!Serial && curMillis - startMillis < MAX_SERIAL_READY_MILLIS);
   Serial.println(BANNER);
 
   // Attach the handlers for the ui
@@ -669,9 +707,10 @@ void setup() {
     ui.attachCmdHandler("mode", onMode) &&
     ui.attachCmdHandler("setwl", onSetWl) &&
     ui.attachCmdHandler("tide", onTide) &&
+    ui.attachCmdHandler("wl", onWl) &&
     ui.attachCmdHandler("config", onConfig) &&
     ui.attachCmdHandler("save", onSave) &&
-    ui.attachCmdHandler("reset", onReset))) {
+    ui.attachCmdHandler("restart", onRestart))) {
     Serial.print(F("[setup] Need more command space.\n"));
   }
 
@@ -716,7 +755,7 @@ void loop() {
     }
 
     // If we're updating the water level display and enough time has passed, do the update
-    if (opMode != adj && curTime - lastWlTime >= TAT_LEVEL_CHECK_SECS) {
+    if (opMode != test && curTime - lastWlTime >= TAT_LEVEL_CHECK_SECS) {
       float waterlevel = getPredWl();
       lastWlTime = curTime;
       if (waterlevel != LEVEL_UNAVAILABLE) {
