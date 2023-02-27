@@ -6,6 +6,8 @@ HTTPS GET REST api for information about the times of for high and low tides and
 predicted water levels for a specified tide station and displays that information on two
 electromechanical displays.
 
+![Portrait](./doc/images/Portrait.jpg)
+
 The first display is the tide clock. It is managed by the TideClock library. This library 
 drives a hacked quartz clock movement to display how much time there is before the next 
 high or low tide. See below for more details.
