@@ -19,13 +19,13 @@
  * Because tides usually don't occur regularly every six hours, the clock can't simply count off standard 
  * hours. Over the years, various methods have been employed to make tide clocks show more or less the 
  * correct number of hours to the next tide. Most commonly, they're set to run so that the hand makes a 
- * complete trip around the dial every 12 hours and 50 minutes, which is close to the average time it takes 
+ * complete trip around the dial every 12 hours and 25 minutes, which is close to the average time it takes 
  * for the moon to cross the same line of longitude on successive days. That's approximately okay if you 
  * live where the tides more or less follow that pattern (e.g., the eastern seaboard of the US), but it's 
  * really pretty unsatisfactory for many places. Where I live in Port Townsend, WA, the tides are much more 
  * irregular than that because the many tidal rivers, bays, inlets, sounds, and straits all slosh around 
  * and couple to one another under the influence of the moon's (and, to some extent, the sun's) gravity. 
- * This tide clock accomodates irregular tides and shows the correct tide time. Here's how it works.
+ * This tide clock accommodates irregular tides and shows the correct tide time. Here's how it works.
  * 
  * Normally, the time on the face progresses at the same rate a normal clock does, thus showing the correct 
  * number of hours to the next tide, but when its position indicates it's at the next tide -- high tide, 

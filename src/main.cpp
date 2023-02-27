@@ -18,7 +18,7 @@
  * The firmware can communicate to a terminal emulator using the Arduino Serial interface over 
  * USB. It has a command interpreter that can be used to change various runtime parameters such 
  * as the WiFi SSID and password to use and which tidal station to show the data for, among 
- * others. There are also various utiility commands that may be of interest. The "h" command 
+ * others. There are also various utility commands that may be of interest. The "h" command 
  * displays a list.
  *  
  * Once the configuration is set, it can be stored in non-volatile memory using the "save" 
