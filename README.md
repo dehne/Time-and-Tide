@@ -47,8 +47,8 @@ The api responses are documented at https://api.tidesandcurrents.noaa.gov/api/pr
 
 ## TideClock
 
-The TideClock class makes a hacked Lavet motor quartz clock movements -- one of the ubiquitous, cheap
-quartz mechanisms powered by a single AA cell. It assumes the movement has been modified to bypass 
+The TideClock class makes use of a hacked Lavet motor quartz clock movements -- one of the ubiquitous, 
+cheapquartz mechanisms powered by a single AA cell. It assumes the movement has been modified to bypass 
 the quartz timing mechanism by tying the connections to the ends of its coil to two pins, tickPin 
 and tockPin, of the featheresp32-s2. A clock hacked in this way can be advanced by alternating pulses 
 on the two pins. Each pulse advances the clock mechanism by one second.
