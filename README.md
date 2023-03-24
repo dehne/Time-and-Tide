@@ -47,8 +47,8 @@ The api responses are documented at https://api.tidesandcurrents.noaa.gov/api/pr
 
 ## TideClock
 
-The TideClock class makes a hacked Lavet motor quartz clock movements -- one of the ubiquitous, cheap
-quartz mechanisms powered by a single AA cell. It assumes the movement has been modified to bypass 
+The TideClock class makes use of a hacked Lavet motor quartz clock movements -- one of the ubiquitous, 
+cheapquartz mechanisms powered by a single AA cell. It assumes the movement has been modified to bypass 
 the quartz timing mechanism by tying the connections to the ends of its coil to two pins, tickPin 
 and tockPin, of the featheresp32-s2. A clock hacked in this way can be advanced by alternating pulses 
 on the two pins. Each pulse advances the clock mechanism by one second.
@@ -74,12 +74,12 @@ This tide clock accommodates irregular tides and shows the correct tide time. He
 Normally, the time on the face progresses at the same rate a normal clock does, thus showing the correct 
 number of hours to the next tide, but when its position indicates it's at the next tide -- high tide, 
 say -- TideClock makes a call to a "get next tide" handler function. The handler returns the POSIX time 
-of the next tide (low in this case). If the time until the next tide is more than six hours off, the clock  
-pauses for the appropriate amount of time before starting up again. If, on the other hand, the time to the 
-next (low) tide is less than six hours away, the clock ticks as fast as it can until it points to the 
-right place and then resumes moving at normal clock-speed once more. Things work exactly the same way when 
-the clock gets to low tide: It asks the handler for the time of the next high tide and then pauses or 
-races forward as needed before beginning once again to run normally.
+of the next tide (low in this case). If the time until the next tide is more than six hours off, the 
+clock pauses for the appropriate amount of time before starting up again. If, on the other hand, the time 
+to the next (low) tide is less than six hours away, the clock ticks as fast as it can until it points to 
+the right place and then resumes moving at normal clock-speed once more. Things work exactly the same way 
+when the clock gets to low tide: It asks the handler for the time of the next high tide and then pauses 
+or races forward as needed before beginning once again to run normally.
 
 The second face design, called the nonlinear design, also shows the correct time to the next tide, but 
 does so in a different way. Instead of showing six hours between tides, it shows 18. But the spacing is 
