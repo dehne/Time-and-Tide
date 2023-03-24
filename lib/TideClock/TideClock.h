@@ -73,18 +73,25 @@
 #include <Arduino.h>  // Arduino 1.0
 
 // Some constants
-#define TC_MIN_LAVET_STEP_INTERVAL  (200)		            // Minimum interval between steps of the Lavet motor (ms)
-#define TC_LAVET_PULSE_DURATION     (60)		            // Duration of the pulses that move the Lavet motor (ms)
+#define TC_MIN_LAVET_STEP_INTERVAL  (200)                   // Minimum interval between steps of the Lavet motor (ms)
+#define TC_LAVET_PULSE_DURATION     (60)                    // Duration of the pulses that move the Lavet motor (ms)
 #define TC_SECONDS_PER_STEP         (12)                    // How many seconds there are in one (linear) clock step
 #define TC_SECONDS_IN_SIX_HOURS     ((uint32_t)6 * 60 * 60) // Six hours in seconds
 #define TC_SECONDS_IN_18_HOURS      ((uint32_t)18 * 60 *60) // Eighteen hours in seconds
 #define TC_A_COEFFICIENT            (1800.0 / (TC_SECONDS_IN_18_HOURS * TC_SECONDS_IN_18_HOURS)) // a in steps(t) = a * t**2
+#define TC_STEPS_IN_A_CYCLE         (60 * 30)               // Number of steps between high and low (or low and high) tide
+#define TC_ASK_TIDE_MILLIS          (120000UL)              // Rate limit for asking for a tide prediction
+#define TC_UNAVAILABLE              (3)                     // tc_tide_t.tideType when the next tide in not available
 
 typedef uint8_t sx_t;                           // Our unit of time i.e. six minutes -- 1/10th of an hour, 1/240th of a day
 enum tc_scale_t : uint8_t {linear, nonlinear};  // The type of scale on a clock face
+struct tc_tide_t {                              // A tide event -- the type of event -- high or low -- and when it occurs
+    uint8_t tideType;                           //  The type of tide event, HIGH or LOW
+    time_t time;                                //  When the event happens
+};
 extern "C" {
-// Sketch-supplied getNextTide handler: time_t handler(void); It should return the time (in POSIX time_t) of the tide extreme
-typedef time_t(*getNextTideHandler_t) (void);
+// Sketch-supplied getNextTide handler: time_t handler(void); It should return a tc_tide_t for the tide extreme
+typedef tc_tide_t(*getNextTideHandler_t) (void);
 }
 
 class TideClock {
@@ -108,7 +115,7 @@ void begin(getNextTideHandler_t h, tc_scale_t type = nonlinear);
 	
 /**
  *
- * @brief The run method for the clock display; call as often as possible
+ * @brief The normal run method for the clock display; call as often as possible
  * 
  * @param t (time_t) Current local time in POSIX time
  * 
@@ -116,11 +123,18 @@ void begin(getNextTideHandler_t h, tc_scale_t type = nonlinear);
 void run(time_t t);
 
 /**
- * @brief Get the POSIX time of the next tide. 0 if none.
+ * @brief   The test mode run method for the clock display; ticks once a second, more
+ *          or less. (Uses millis() for timing.)
  * 
- * @return time_t 
  */
-time_t getNextTide();
+void test();
+
+/**
+ * @brief Get the tide event for the next tide. 0 if none.
+ * 
+ * @return tc_tide_t 
+ */
+tc_tide_t getNextTide();
   
 private:
 /***
@@ -134,7 +148,8 @@ bool tick;                              // Step should "tick" the clock if true,
 bool paused;                            // True if we're waiting to get close enough to a tide to run
 tc_scale_t faceType;                    // The type of face the clock has; linear or nonlinear
 int32_t stepsTaken;                     // The number of steps taken by the clock since the last tide
-time_t nextTide;                        // The POSIX time of the next tide extreme (high or low)
+tc_tide_t nextTide;                     // The next tide event
+unsigned long gotTideMillis;            // millis() at the time we last asked for the next tide prediction
 unsigned long lastMillis;               // millis() the last time step() was invoked
 getNextTideHandler_t handler;           // The handler to call for the time of the next high/low tide
 
@@ -143,7 +158,7 @@ getNextTideHandler_t handler;           // The handler to call for the time of t
  *          an hour -- 12 seconds.
  * 
  */
-void step();							// Step clock forward one step -- 12 seconds
+void step();
 
 /**
  * @brief Convert the given count in seconds past midnight to "hh:mm:ss"

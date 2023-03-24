@@ -108,9 +108,9 @@ TideClock tc {TICK_PIN, TOCK_PIN};                    // The tide clock device
 WlDisplay wld {STEPPER_PIN_1, STEPPER_PIN_2, STEPPER_PIN_3, STEPPER_PIN_4, LIMIT_PIN, POWER_PIN}; // The water level display device
 UserInput ui {};                                      // User interface object -- cmd line processor
 float predWl[TAT_N_PRED_WL];                          // The today's predicted water levels, every six minutes from 00:00 to 24:00
-bool nextTideType = HIGH;                             // The next tide type; HIGH or LOW
 configData_t config;                                  // The configuration data stored in NVS
 opMode_t opMode;                                      // Whether we're running normally or doing adjustments
+bool testTicking = false;                             // In test mode, whether the clock is ticking
 
 /***
  * 
@@ -347,14 +347,17 @@ float getPredWl() {
 }
 
 /**
- * @brief Get-next-tide handler. Return the time, in time_t form, of the next high or low tide.
- *        This is intended as the handler function for a TideClock
+ * @brief Get-next-tide handler. Return the information, in time_t form, about 
+ *        the next high or low tide. This function is intended as the handler 
+ *        function for a TideClock
  * 
- * @return time_t 
+ * @return tc_tide_t 
  */
-time_t getNextTide() {
+tc_tide_t getNextTide() {
   time_t nowSecs = time(nullptr);
-  time_t answer = nowSecs + SECONDS_IN_NOMINAL_TIDE;
+  tc_tide_t answer;
+  answer.tideType = TC_UNAVAILABLE;
+  answer.time = 0;
   String timeStamp = toNOAAformat(nowSecs);
   String payload = getPayload(((String(TAT_SERVER_URL "?" TAT_GET_PRED_TIDES) + 
     toNOAAformat(nowSecs, true)) + String("&station=") + String(config.station)).c_str());
@@ -370,15 +373,16 @@ time_t getNextTide() {
           log_d("%s", ix < sz -1 ? ", " : "\n");
         }
         for (uint8_t ix = 0; ix < sz; ix++) {
-          answer = fromNOAAformat(predictions["predictions"][ix]["t"].as<String>());
-          nextTideType = predictions["predictions"][ix]["type"].as<String>().equals("H");
-          if (answer > nowSecs) {
+          answer.time = fromNOAAformat(predictions["predictions"][ix]["t"].as<String>());
+          answer.tideType = predictions["predictions"][ix]["type"].as<String>().equals("H") ? HIGH : LOW;
+          if (answer.time > nowSecs) {
             break;
           }
           if (ix == sz - 1) {
-            Serial.printf(". Using default tidal interval; didn't find a next tide after %s",
+            Serial.printf(". Didn't find a next tide after %s",
               asctime(localtime(&nowSecs)));
-            answer = nowSecs + SECONDS_IN_NOMINAL_TIDE;
+            answer.tideType = TC_UNAVAILABLE;
+            answer.time = 0;
           }
         }
       } else {
@@ -386,13 +390,18 @@ time_t getNextTide() {
         log_d("[getNextTide] Payload: \"%s\"\n", payload.c_str());
       }
     } else {
-      Serial.printf("[getNextTide %s] Using default tide interval. Json deserialization of tides didn't work out. Error: %d\n", 
+      Serial.printf("[getNextTide %s] Json deserialization of tides didn't work out. Error: %d\n", 
         timeStamp.c_str(), err.c_str());
     }
   }
-  uint32_t fromNow = (uint32_t)(answer - nowSecs);
-  Serial.printf("[getNextTide %s] Next tide (%s) is %02d:%02d:%02d from now at %s\n", 
-    timeStamp.c_str(), nextTideType ? "High" : "Low", fromNow / 3600, (fromNow % 3600) / 60, fromNow % 60, toNOAAformat(answer).c_str());
+  if (answer.tideType == TC_UNAVAILABLE) {
+    Serial.printf("[getNextTide %s] Next tide data unavailable.\n", timeStamp.c_str());
+  } else {
+    uint32_t fromNow = (uint32_t)(answer.time - nowSecs);
+    Serial.printf("[getNextTide %s] Next tide (%s) is %02d:%02d:%02d from now at %s\n", 
+      timeStamp.c_str(), answer.tideType == HIGH ? "High" : "Low", 
+      fromNow / 3600, (fromNow % 3600) / 60, fromNow % 60, toNOAAformat(answer.time).c_str());
+  }
   return answer;
 }
 
@@ -530,9 +539,10 @@ void onCmdUnrecognized() {
  */
 void onHelp() {
   Serial.print(
-    "help | h                       Print this summary of the commands.\n"
-    "mode run | test                Set the operating mode: run normally or enter test mode.\n"
+    "help | h                       Print this summary of the commands\n"
+    "mode run | test                Set the operating mode: run normally or enter test mode\n"
     "setwl <float>                  In test mode, set the displayed water level (ft MLLW)\n"
+    "tick [on | off]                In test mode, start, stop or toggle ticking the clock\n"
     "tide                           Print information about the next high or low tide\n"
     "wl                             Print information about the current water level\n"
     "config                         Print the current configuration\n"
@@ -548,15 +558,14 @@ void onHelp() {
 
 /**
  * @brief The mode command handler. Set the mode either to "run" or "test." During run mode, 
- *        the clock and the tide display run normally, during test mode, the tide level 
- *        display is paused and the setwl command can be used to show what different water 
- *        levels will look like.
+ *        the clock and the tide display run normally. During test mode neither runs and the
+ *        setwl and tick commands become active.tick
+ * tick
+ * tick
+ * 
  */
 void onMode() {
-  if (opMode == notInit) {
-    Serial.print("Initialization didn\'t succeed; can\'t change mode.\n");
-    return;
-  }
+
   String modeName = ui.getWord(1);
   if (modeName.equalsIgnoreCase("run")) {
     opMode = run;
@@ -584,19 +593,41 @@ void onSetWl() {
 }
 
 /**
+ * @brief The tick command handler. Test mode only. Start, stop or toggle the tide 
+ *        clock mechanism ticking once per second.
+ * 
+ */
+void onTick() {
+  if (opMode != test) {
+    Serial.print(F("tick command only active in test mode.\n"));
+    return;
+  }
+  String cmd = ui.getWord(1);
+  if (cmd.length() == 0) {
+    testTicking = !testTicking;
+  } else if (cmd.equalsIgnoreCase("on")) {
+    testTicking = true;
+  } else if (cmd.equalsIgnoreCase("off")) {
+    testTicking = false;
+  } else {
+    Serial.printf("Tick can't be %s. Needs to be empty, 'on' or 'off'.\n");
+  }
+}
+
+/**
  * @brief The tide command handler. Display information related to the next tide
  */
 void onTide() {
-  time_t nextTide = tc.getNextTide();
+  tc_tide_t nextTide = tc.getNextTide();
   time_t t = time(nullptr);
   Serial.printf("It is now %s UTC. ", toHhmmss(t).c_str());
-  if (nextTide == 0) {
-    Serial.print(" No next tide has been set yet.\n");
+  if (nextTide.tideType == TC_UNAVAILABLE) {
+    Serial.print(" Next tide data is unavailable.\n");
     return;
   }
-  int32_t secToNextTide = static_cast<int32_t>(nextTide) - static_cast<int32_t>(t);
+  int32_t secToNextTide = static_cast<int32_t>(nextTide.time) - static_cast<int32_t>(t);
   Serial.printf("The next tide (%s) is at %s, %s (%d seconds) from now.\n",
-    nextTideType ? "High" : "Low", toHhmmss(nextTide).c_str(), toHhmmss(secToNextTide).c_str(), secToNextTide);
+    nextTide.tideType == HIGH ? "High" : "Low", toHhmmss(nextTide.time).c_str(), toHhmmss(secToNextTide).c_str(), secToNextTide);
 }
 
 /**
@@ -710,7 +741,8 @@ void setup() {
     ui.attachCmdHandler("wl", onWl) &&
     ui.attachCmdHandler("config", onConfig) &&
     ui.attachCmdHandler("save", onSave) &&
-    ui.attachCmdHandler("restart", onRestart))) {
+    ui.attachCmdHandler("restart", onRestart) &&
+    ui.attachCmdHandler("tick", onTick))) {
     Serial.print(F("[setup] Need more command space.\n"));
   }
 
@@ -743,28 +775,34 @@ void loop() {
   time_t curTime = time(nullptr);
   uint32_t curGmToD = timeToTimeOfDayUTC(curTime);
 
-  if (opMode != notInit) {                                        // If initialized
+  if (opMode == test) {
+    if (testTicking) {
+      tc.test();
+    }    
+  } else {
+    if (opMode != notInit) {                                        // If initialized
 
-    // Use NTP to set our internal clock once a day
-    uint32_t curTimeOfDayUTC = timeToTimeOfDayUTC(curTime);
-    if (needToSetClock && curTimeOfDayUTC >= TAT_SET_CLOCK_UTC_SECS) {
-      setClock();
-      needToSetClock = false;
-    } else if (curTimeOfDayUTC < TAT_SET_CLOCK_UTC_SECS) {
-      needToSetClock = true;
-    }
-
-    // If we're updating the water level display and enough time has passed, do the update
-    if (opMode != test && curTime - lastWlTime >= TAT_LEVEL_CHECK_SECS) {
-      float waterlevel = getPredWl();
-      lastWlTime = curTime;
-      if (waterlevel != LEVEL_UNAVAILABLE) {
-        wld.setLevel(waterlevel);
+      // Use NTP to set our internal clock once a day
+      uint32_t curTimeOfDayUTC = timeToTimeOfDayUTC(curTime);
+      if (needToSetClock && curTimeOfDayUTC >= TAT_SET_CLOCK_UTC_SECS) {
+        setClock();
+        needToSetClock = false;
+      } else if (curTimeOfDayUTC < TAT_SET_CLOCK_UTC_SECS) {
+        needToSetClock = true;
       }
-    }
 
-    // Let the tide clock do its thing
-    tc.run(curTime);
+      // If we're updating the water level display and enough time has passed, do the update
+      if (curTime - lastWlTime >= TAT_LEVEL_CHECK_SECS) {
+        float waterlevel = getPredWl();
+        lastWlTime = curTime;
+        if (waterlevel != LEVEL_UNAVAILABLE) {
+          wld.setLevel(waterlevel);
+        }
+      }
+
+      // Let the tide clock do its thing
+      tc.run(curTime);
+    }
   }
 
   // Let the water level display do its thing

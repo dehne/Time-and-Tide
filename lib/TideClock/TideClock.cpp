@@ -23,11 +23,12 @@ TideClock::TideClock(uint8_t iPin, uint8_t oPin) {
   tick = true;
   paused = false;
   stepsTaken = 0;
-  nextTide = 0;
-  pinMode(tickPin, OUTPUT);  // Set the tick pin of the clock's Lavet motor to OUTPUT,
-  digitalWrite(tickPin, LOW);  //   with a low-impedance path to ground
-  pinMode(tockPin, OUTPUT);  // Set the tock pin of the clock's Lavet motor to OUTPUT,
-  digitalWrite(tockPin, LOW);  //   with a low impedance path to ground
+  nextTide.tideType = TC_UNAVAILABLE;
+  nextTide.time = 0;
+  pinMode(tickPin, OUTPUT);             // Set the tick pin of the clock's Lavet motor to OUTPUT,
+  digitalWrite(tickPin, LOW);           //   with a low-impedance path to ground
+  pinMode(tockPin, OUTPUT);             // Set the tock pin of the clock's Lavet motor to OUTPUT,
+  digitalWrite(tockPin, LOW);           //   with a low impedance path to ground
 }
 
 /***
@@ -50,19 +51,29 @@ void TideClock::run(time_t t) {
     return;
   }
   lastMillis = curMillis;
-  bool firstPass = nextTide == 0;
+  bool firstPass = nextTide.time == 0;
 
-  // If we don't have a valid predicted time for the next tide, get one
-  // and indicate we're starting a new cycle
   bool startingNewCycle = false;
-  if (t > nextTide) {
-    nextTide = (*handler)();
+  bool missedCycle = false;
+  // If we're past the time of the next tide, deal with it
+  if (t > nextTide.time) {
+    if (curMillis - gotTideMillis < TC_ASK_TIDE_MILLIS) {
+      return;                                     // Don't ask about the tide too often
+    }
+    tc_tide_t newTide = (*handler)();
+    gotTideMillis = curMillis;
+    // If that didn't work, give up for now
+    if (newTide.tideType == TC_UNAVAILABLE) {
+      return;
+    }
+    missedCycle = nextTide.tideType == newTide.tideType;  // If it looks like two same tides in row we missed a cycle
+    nextTide = newTide;
     startingNewCycle = true;
     stepsTaken = 0;
   }
 
   // Calculate the relevant quantities
-  int32_t secToNextTide = nextTide - t;
+  int32_t secToNextTide = static_cast<int32_t>(nextTide.time - t);
   float secFromCycleEnd;
   int32_t stepsNeeded;
   if (faceType == nonlinear) {
@@ -75,9 +86,14 @@ void TideClock::run(time_t t) {
 
   // If we're starting a new cycle, do the initializaton for it
   if (startingNewCycle) {
-    if (secFromCycleEnd < 0) {
-      Serial.printf("[TideClock::run %s] New tide %s is (%d seconds) away. Pausing for %d seconds.\n", 
-        posixTimeToHHMMSS(t).c_str(), secToHHMMSS(secToNextTide).c_str(), secToNextTide, static_cast<int32_t>(-secFromCycleEnd));
+    if (missedCycle) {
+      stepsNeeded += TC_STEPS_IN_A_CYCLE;
+      Serial.printf("[TideClock::run %s] Missed at least a whole tide cycle, but now have data.\n", posixTimeToHHMMSS(t).c_str());
+    }
+    if (secFromCycleEnd < 0 && !missedCycle) {
+      Serial.printf("[TideClock::run %s] New tide (%s) is %s away. Pausing for %d seconds.\n", 
+        posixTimeToHHMMSS(t).c_str(), nextTide.tideType == HIGH ? "high" : "low", 
+        secToHHMMSS(secToNextTide).c_str(), static_cast<int32_t>(-secFromCycleEnd));
       paused = true;
     } else {
       if (firstPass) {
@@ -85,8 +101,9 @@ void TideClock::run(time_t t) {
         posixTimeToHHMMSS(t).c_str(), secToHHMMSS(secToNextTide).c_str(), secToNextTide);
         stepsTaken = stepsNeeded;       // Assume clock is set correctly.
       } else {
-        Serial.printf("[TideClock::run %s] New tide is %s (%d seconds) away. Taking %d quick steps to get on target.\n",
-          posixTimeToHHMMSS(t).c_str(), secToHHMMSS(secToNextTide).c_str(), secToNextTide, stepsNeeded - stepsTaken);
+        Serial.printf("[TideClock::run %s] New tide (%s) is %s away. Taking %d quick steps to get on target.\n",
+          posixTimeToHHMMSS(t).c_str(), nextTide.tideType == HIGH ? "high" : "low", 
+          secToHHMMSS(secToNextTide).c_str(), stepsNeeded - stepsTaken);
       }
     }
   }
@@ -94,7 +111,7 @@ void TideClock::run(time_t t) {
   // Deal with being paused
   if (paused) {
     if (secFromCycleEnd == 0) {
-      Serial.printf("[TideClock::runNonlinear %s] The tide is %s (%d seconds) away. Starting clock.\n",
+      Serial.printf("[TideClock::run %s] The tide is %s (%d seconds) away. Starting clock.\n",
         posixTimeToHHMMSS(t).c_str(), secToHHMMSS(secToNextTide).c_str(), secToNextTide);
       paused = false;
     }
@@ -108,9 +125,21 @@ void TideClock::run(time_t t) {
 }
 
 /***
+ * test()
+ ***/
+void TideClock::test() {
+  unsigned long curMillis = millis();
+  if (curMillis - lastMillis < 1000) {
+    return;
+  }
+  lastMillis = curMillis;
+  step();
+}
+
+/***
  * getNextTide()
  ***/
-time_t TideClock::getNextTide() {
+tc_tide_t TideClock::getNextTide() {
   return nextTide;
 }
 
