@@ -41,6 +41,7 @@ void WlDisplay::begin(float minL, float maxL) {
   pinMode(powerPin, INPUT_PULLDOWN);
   powerIsOn = digitalRead(powerPin) == HIGH;
   powerUnstable = true;
+  stepper->autoPower(true);
   log_d("[WlDisplay::begin] Stepper parms - stepsPerFoot: %d, pos at minLevel: %d, pos at maxLevel: %d.\n",
     stepsPerFoot, (int16_t)(minLevel * stepsPerFoot), (int16_t)(maxLevel * stepsPerFoot));
 }
@@ -52,7 +53,6 @@ bool WlDisplay::home() {
   if (digitalRead(powerPin) == HIGH) {
     stepper->setRunMode(KEEP_SPEED);
     stepper->setSpeedDeg(WLD_HOMING_DEG_PER_SEC);
-    stepper->autoPower(true);
     while (digitalRead(limitPin) == HIGH) {
       stepper->tick();
     }
@@ -107,8 +107,9 @@ void WlDisplay::run() {
     }
   }
 
-  // If the power just came on, do a home() just to be on the saf side.
+  // If the power just came on, do a home() just to be on the safe side.
   if (powerCameOn) {
+    Serial.print("[WlDisplay::run] Homing the water level display.\n");
     home();
   }
 
