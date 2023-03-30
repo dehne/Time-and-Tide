@@ -1,7 +1,7 @@
 /****
  *
  * TideClock.cpp
- * Part of the "TideClock" library for Arduino. Version 0.5.0
+ * Part of the "TideClock" library for Arduino. Version 0.6.0
  *
  * See tideClock.h for details
  *
@@ -20,7 +20,7 @@
 TideClock::TideClock(uint8_t iPin, uint8_t oPin) {
   tickPin = iPin;
   tockPin = oPin;
-  tick = true;
+  stepType = true;
   paused = false;
   stepsTaken = 0;
   nextTide.tideType = TC_UNAVAILABLE;
@@ -34,11 +34,23 @@ TideClock::TideClock(uint8_t iPin, uint8_t oPin) {
 /***
  * begin(h, type)
  ***/
-void TideClock::begin(getNextTideHandler_t h, tc_scale_t type) {
+void TideClock::begin(getNextTideHandler_t h, tc_scale_t type, tc_motor_t motor) {
   handler = h;
   faceType = type;
-  Serial.printf("[TideClock::begin] Using %s clock face.\n", faceType == linear ? "linear" : "nonlinear");
+  motorType = motor;
+  if (motorType == tcOne) {
+    stepsPerTick = TC_ONE_STEPS_PER_TICK;
+    minStepInterval = TC_ONE_MIN_STEP_INTERVAL;
+    pulseDuration = TC_ONE_PULSE_DURATION;
+  } else {
+    stepsPerTick = TC_SIXTEEN_STEPS_PER_TICK;
+    minStepInterval = TC_SIXTEEN_MIN_STEP_INTERVAL;
+    pulseDuration = TC_SIXTEEN_PULSE_DURATION;
+  }
+  Serial.printf("[TideClock::begin] Using %s clock face with type %s motor.\n", 
+    faceType == tcLinear ? "linear" : "nonlinear", motorType == tcOne ? "one" : "sixteen");
   lastMillis = millis();
+  gotTideMillis = 0;
 }
 
 /***
@@ -47,7 +59,7 @@ void TideClock::begin(getNextTideHandler_t h, tc_scale_t type) {
 void TideClock::run(time_t t) {
   unsigned long curMillis = millis();
   // We only need to go as fast as the motor can.
-  if (curMillis - lastMillis < TC_MIN_LAVET_STEP_INTERVAL) {
+  if (curMillis - lastMillis < minStepInterval) {
     return;
   }
   lastMillis = curMillis;
@@ -76,34 +88,33 @@ void TideClock::run(time_t t) {
   int32_t secToNextTide = static_cast<int32_t>(nextTide.time - t);
   float secFromCycleEnd;
   int32_t stepsNeeded;
-  if (faceType == nonlinear) {
+  if (faceType == tcNonlinear) {
     secFromCycleEnd = static_cast<float>(TC_SECONDS_IN_18_HOURS - secToNextTide);
-    stepsNeeded = static_cast<int32_t>(TC_A_COEFFICIENT * (secFromCycleEnd * secFromCycleEnd));
+    stepsNeeded = stepsPerTick * static_cast<int32_t>(TC_A_COEFFICIENT * (secFromCycleEnd * secFromCycleEnd));
   } else {
     secFromCycleEnd = static_cast<float>(TC_SECONDS_IN_SIX_HOURS - secToNextTide);
-    stepsNeeded = static_cast<int32_t>(secFromCycleEnd / TC_SECONDS_PER_STEP);
+    stepsNeeded = stepsPerTick * static_cast<int32_t>(secFromCycleEnd / TC_SECONDS_PER_TICK);
   }
-
+  
   // If we're starting a new cycle, do the initializaton for it
   if (startingNewCycle) {
     if (missedCycle) {
-      stepsNeeded += TC_STEPS_IN_A_CYCLE;
+      stepsNeeded += stepsPerTick * TC_TICKS_IN_A_CYCLE;
       Serial.printf("[TideClock::run %s] Missed at least a whole tide cycle, but now have data.\n", posixTimeToHHMMSS(t).c_str());
     }
+    String highOrLow = nextTide.tideType == HIGH ? "high" : "low";
     if (secFromCycleEnd < 0 && !missedCycle) {
       Serial.printf("[TideClock::run %s] New tide (%s) is %s away. Pausing for %d seconds.\n", 
-        posixTimeToHHMMSS(t).c_str(), nextTide.tideType == HIGH ? "high" : "low", 
-        secToHHMMSS(secToNextTide).c_str(), static_cast<int32_t>(-secFromCycleEnd));
+        posixTimeToHHMMSS(t).c_str(), highOrLow, secToHHMMSS(secToNextTide).c_str(), static_cast<int32_t>(-secFromCycleEnd));
       paused = true;
     } else {
       if (firstPass) {
-        Serial.printf("[TideClock::run %s] The tide is %s (%d seconds) away. Check that the clock is set correctly.\n",
-        posixTimeToHHMMSS(t).c_str(), secToHHMMSS(secToNextTide).c_str(), secToNextTide);
+        Serial.printf("[TideClock::run %s] The tide (%s) is %s away. Check that the clock is set correctly.\n",
+        posixTimeToHHMMSS(t).c_str(), highOrLow, secToHHMMSS(secToNextTide).c_str());
         stepsTaken = stepsNeeded;       // Assume clock is set correctly.
       } else {
         Serial.printf("[TideClock::run %s] New tide (%s) is %s away. Taking %d quick steps to get on target.\n",
-          posixTimeToHHMMSS(t).c_str(), nextTide.tideType == HIGH ? "high" : "low", 
-          secToHHMMSS(secToNextTide).c_str(), stepsNeeded - stepsTaken);
+          posixTimeToHHMMSS(t).c_str(), highOrLow, secToHHMMSS(secToNextTide).c_str(), stepsNeeded - stepsTaken);
       }
     }
   }
@@ -127,13 +138,15 @@ void TideClock::run(time_t t) {
 /***
  * test()
  ***/
-void TideClock::test() {
+bool TideClock::test() {
   unsigned long curMillis = millis();
-  if (curMillis - lastMillis < 1000) {
-    return;
+  nextTide.time = 0;
+  if (curMillis - lastMillis < minStepInterval) {
+    return false;
   }
   lastMillis = curMillis;
   step();
+  return true;
 }
 
 /***
@@ -147,18 +160,18 @@ tc_tide_t TideClock::getNextTide() {
  * step()
  ***/
 void TideClock::step() {
-  if (tick) {
+  if (stepType) {
     digitalWrite(LED_BUILTIN, HIGH);
-    digitalWrite(tickPin, HIGH);  // Issue a tick pulse
-    delay(TC_LAVET_PULSE_DURATION);
+    digitalWrite(tickPin, HIGH);  // Issue a forward pulse
+    delay(pulseDuration);
     digitalWrite(tickPin, LOW);
   } else {
     digitalWrite(LED_BUILTIN, LOW);
-    digitalWrite(tockPin, HIGH);  // Issue a tock pulse
-    delay(TC_LAVET_PULSE_DURATION);
+    digitalWrite(tockPin, HIGH);  // Issue a backward pulse
+    delay(pulseDuration);
     digitalWrite(tockPin, LOW);
   }
-  tick = !tick;  // Switch from tick to tock or vice versa
+  stepType = ! stepType;          // Switch from forward pulse to backward or vice versa
 }
 
 /***

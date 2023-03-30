@@ -24,7 +24,7 @@
 #define TAT_STATION_MAX_LEVEL   (12.1)
 
 // The tc_scale_t type of clock face the device has; linear or nonlinear
-#define TAT_FACE_TYPE           (nonlinear)
+#define TAT_FACE_TYPE           (tcNonlinear)
 
 // The ESP32 non-volatile name space we use to store our config data
 #define TAT_NVS_NAMESPACE       "Tide and Time"
@@ -33,7 +33,7 @@
 // The ESP32 NVS key name for our data blob
 #define TAT_NVS_DATA_NAME       "datablob"
 // The value of the signature on the data stored in nvs
-#define TAT_NVS_SIG             (0x7460)
+#define TAT_NVS_SIG             (0x2623)
 
 // How long (ms) to wait for the WiFi to connect before declaring failure
 #define TAT_WIFI_WAIT_MILLIS    (15000)

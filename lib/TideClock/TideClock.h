@@ -1,20 +1,34 @@
 /****
  *
  *  TideClock.h
- *  Part of the "TideClock" library for Arduino. Version 0.5.0
+ *  Part of the "TideClock" library for Arduino. Version 0.6.0
  *
- * The TideClock class makes a hacked Lavet motor quartz clock movements -- one of the ubiquitous, cheap
- * quartz mechanisms powered by a single AA cell. It assumes the movement has been modified to bypass 
- * the quartz timing mechanism by tying the connections to the ends of its coil to two pins, tickPin 
- * and tockPin, of the Arduino. A clock hacked in this way can be advanced by alternating pulses on the 
- * two pins. Each pulse advances the clock mechanism by one second.
+ * The TideClock class uses a hacked Lavet motor quartz clock movement -- one of the ubiquitous, cheap
+ * quartz mechanisms powered by a single AA cell to display the number of hours to the next tide. It 
+ * assumes the movement has been modified by connecting the two ends of its coil to two pins, tickPin 
+ * and tockPin, of an microprocessor running Arduino framework-based firmware. 
  * 
- * For this application, there are two alternative clock face designs. The first, called the linear 
- * design, has traditional tide clock markings and one hand: straight up is high tide and straight down 
- * is low tide. The interval from high and low tide is divided six sub-intervals, showing how many hours 
- * there are from the current time to low tide. E.g., when the hand gets to the "one o'clock" position 
- * there are five hours to the upcoming low tide. The interval from low tide to high is similarly 
- * subdivided to show the number of hours to the next low tide. 
+ * A clock hacked in this way can be advanced by alternating pulses on the two pins. Each pulse 
+ * advances the clock mechanism by one step. I've found two versions of the mechanism. You can tell 
+ * which kind you have by installing a second hand and popping in a battery. If the second hand jumps 
+ * forward and pauses with each passing second, you have a clock with a type tcOne motor. If the second 
+ * hand moves forward smoothly with the passing of time, you have a clock with a tcSixteen motor.
+ * 
+ * So far I have been unable to make the tcSixteen motor version work reliably. They run fine once 
+ * they're started but are a finicky about starting and stopping, which is required here. I've got 
+ * a test program I'm using to try to find a set of timing parameters that works, but so far it's 
+ * been "close but no cigar." Worse, after stopping, I've seen them end up part way between steps and 
+ * completely refuse to start again without bumping them. Tiny forces and odd mechanical resonances. 
+ * For now, at least it's best to stick with clocks that use type tcOne motors which are designed to 
+ * run intermittantly.
+ * 
+ * TideClock supports two alternative clock face designs. The first, called the linear design, has 
+ * traditional tide clock markings and one hand: straight up is high tide and straight down is low 
+ * tide. The interval from high and low tide is divided six sub-intervals, showing how many hours there 
+ * are from the current time to low tide. E.g., when the hand gets to what on a normal clock is the 
+ * "one o'clock" position there are five hours to the upcoming low tide and that position on the face 
+ * is labeled with a "5". The "two o'clock" position is labeled with a "4" and so on. The interval from 
+ * low tide to high is similarly marked to show the number of hours to the next high tide. 
  * 
  * Because tides usually don't occur regularly every six hours, the clock can't simply count off standard 
  * hours. Over the years, various methods have been employed to make tide clocks show more or less the 
@@ -50,14 +64,13 @@
  * 
  * How the "get next tide" handler function works isn't a concern of the clock, but typically it works by
  * asking an online tide model service for the requisite information at the location of interest. For the US, 
- * NOAA comes to mind.
+ * NOAA Tides and Currents comes to mind.
  * 
  * To use the TideClock, instantiate a TideCLock object as a global variable, telling it which GPIO
  * pins the Lavet motor is connected to. In the Arduino setup function, use the begin member function to 
- * tell it what the address of the handler function is and whether the clock face is linear or nonlinear. 
- * Then in in the Arduino loop function invoke run member function, passing the current POSIX time. Do 
- * this at least once every six seconds, or more often if you don't have anyting better for the Arduino to 
- * do.
+ * tell it what the address of the handler function is, whether the clock face is linear or nonlinear and
+ * what type of motor your movement has. Then in in the Arduino loop function invoke run member function, 
+ * passing the current POSIX time. Do this as often as possible.
  * 
  * TideClock assumes that the clock's position has been set manually at the time of the first call to 
  * run().
@@ -73,21 +86,26 @@
 #include <Arduino.h>  // Arduino 1.0
 
 // Some constants
-#define TC_MIN_LAVET_STEP_INTERVAL  (200)                   // Minimum interval between steps of the Lavet motor (ms)
-#define TC_LAVET_PULSE_DURATION     (60)                    // Duration of the pulses that move the Lavet motor (ms)
-#define TC_SECONDS_PER_STEP         (12)                    // How many seconds there are in one (linear) clock step
-#define TC_SECONDS_IN_SIX_HOURS     ((uint32_t)6 * 60 * 60) // Six hours in seconds
-#define TC_SECONDS_IN_18_HOURS      ((uint32_t)18 * 60 *60) // Eighteen hours in seconds
-#define TC_A_COEFFICIENT            (1800.0 / (TC_SECONDS_IN_18_HOURS * TC_SECONDS_IN_18_HOURS)) // a in steps(t) = a * t**2
-#define TC_STEPS_IN_A_CYCLE         (60 * 30)               // Number of steps between high and low (or low and high) tide
-#define TC_ASK_TIDE_MILLIS          (120000UL)              // Rate limit for asking for a tide prediction
-#define TC_UNAVAILABLE              (3)                     // tc_tide_t.tideType when the next tide in not available
+#define TC_ONE_MIN_STEP_INTERVAL        (200)                   // For tcOne motors, minimum interval between steps (millis())
+#define TC_ONE_PULSE_DURATION           (60)                    // For tcOne motors, duration of the step pulses (millis())
+#define TC_ONE_STEPS_PER_TICK           (1)                     // For tcOne motors, steps per tick
+#define TC_SIXTEEN_MIN_STEP_INTERVAL    (31)                    // For tcSixteen motors, minimum interval between steps (millis())
+#define TC_SIXTEEN_PULSE_DURATION       (31)                    // For tcSixteen motors, duration of the step pulses (millis())
+#define TC_SIXTEEN_STEPS_PER_TICK       (16)                    // For tcSixteen motors, steps per tick
+#define TC_SECONDS_PER_TICK             (12)                    // How many seconds there are in one (linear) clock tick
+#define TC_SECONDS_IN_SIX_HOURS         ((uint32_t)6 * 60 * 60) // Six hours in seconds
+#define TC_SECONDS_IN_18_HOURS          ((uint32_t)18 * 60 *60) // Eighteen hours in seconds
+#define TC_A_COEFFICIENT                (1800.0 / (TC_SECONDS_IN_18_HOURS * TC_SECONDS_IN_18_HOURS)) // a in ticks(t) = a * t**2
+#define TC_TICKS_IN_A_CYCLE             (60 * 30)               // Number of ticks between high and low (or low and high) tide
+#define TC_ASK_TIDE_MILLIS              (120000UL)              // Rate limit for asking for a tide prediction
+#define TC_UNAVAILABLE                  (3)                     // tc_tide_t.tideType when the next tide in not available
 
-typedef uint8_t sx_t;                           // Our unit of time i.e. six minutes -- 1/10th of an hour, 1/240th of a day
-enum tc_scale_t : uint8_t {linear, nonlinear};  // The type of scale on a clock face
-struct tc_tide_t {                              // A tide event -- the type of event -- high or low -- and when it occurs
-    uint8_t tideType;                           //  The type of tide event, HIGH or LOW
-    time_t time;                                //  When the event happens
+typedef uint8_t sx_t;                               // Our unit of time i.e. six minutes -- 1/10th of an hour, 1/240th of a day
+enum tc_scale_t : uint8_t {tcLinear, tcNonlinear};  // The type of scale on a clock face
+enum tc_motor_t : uint8_t {tcOne, tcSixteen};       // The type of lavet motor: one step/tick or 16 steps/tick
+struct tc_tide_t {                                  // A tide event -- the type of event -- high or low -- and when it occurs
+    uint8_t tideType;                               //  The type of tide event, HIGH or LOW
+    time_t time;                                    //  When the event happens
 };
 extern "C" {
 // Sketch-supplied getNextTide handler: time_t handler(void); It should return a tc_tide_t for the tide extreme
@@ -110,8 +128,9 @@ TideClock(uint8_t iPin, uint8_t oPin);
  * 
  * @param h     (getNextTideHandler_t) The handler to call to get the POSIX time of the next tide extreme
  * @param type  (tc_scale_t) The type of face the clock has
+ * @param motor (tc_motor_t) The type of motor the clock has
  */
-void begin(getNextTideHandler_t h, tc_scale_t type = nonlinear);
+void begin(getNextTideHandler_t h, tc_scale_t type = tcNonlinear, tc_motor_t motor = tcOne);
 	
 /**
  *
@@ -123,11 +142,13 @@ void begin(getNextTideHandler_t h, tc_scale_t type = nonlinear);
 void run(time_t t);
 
 /**
- * @brief   The test mode run method for the clock display; ticks once a second, more
- *          or less. (Uses millis() for timing.)
+ * @brief   The test mode run method for the clock display; Step whenever it's possible
+ *          without exceeding the motor's speed limit.
  * 
+ * @return  true  Step taken
+ * @return false  Step not taken (not enough time passed)
  */
-void test();
+bool test();
 
 /**
  * @brief Get the tide event for the next tide. 0 if none.
@@ -144,18 +165,21 @@ private:
  ***/
 uint8_t tickPin;                        // The pin to pulse to tick the clock forward one second
 uint8_t tockPin;                        // The pin to pulse to tock the clock forward one second
-bool tick;                              // Step should "tick" the clock if true, "tock" it if not
+bool stepType;                          // The direction of the pulse step() should use next
 bool paused;                            // True if we're waiting to get close enough to a tide to run
-tc_scale_t faceType;                    // The type of face the clock has; linear or nonlinear
+tc_scale_t faceType;                    // The type of face the clock has; tcLinear or tcNonlinear
+tc_motor_t motorType;                   // The type of motor the clock has, tcOne ot tcSixteen
+unsigned long stepsPerTick;             // The number of steps per tick for our motor
+unsigned long minStepInterval;          // The minimum step interval for our motor (millis())
+uint32_t pulseDuration;                 // How long the step pulse is for our motor (millis())
 int32_t stepsTaken;                     // The number of steps taken by the clock since the last tide
 tc_tide_t nextTide;                     // The next tide event
 unsigned long gotTideMillis;            // millis() at the time we last asked for the next tide prediction
-unsigned long lastMillis;               // millis() the last time step() was invoked
+unsigned long lastMillis;               // millis() the last time step() or test() was invoked
 getNextTideHandler_t handler;           // The handler to call for the time of the next high/low tide
 
 /**
- * @brief   Member function invoked to cause the clock mechanism to make one step forward. One step is 1/300 of 
- *          an hour -- 12 seconds.
+ * @brief   Member function invoked to cause the clock mechanism to make one step forward.
  * 
  */
 void step();

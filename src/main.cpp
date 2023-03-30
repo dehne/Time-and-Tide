@@ -94,7 +94,8 @@ struct configData_t {                                 // The shape of the data w
   char station[8];                                    //   The 7-decimal-digit NOAA station ID we're doing tides for (null-padded) 
   float minLevel;                                     //   The lowest tide to be displayed (feet above/below MLLW)
   float maxLevel;                                     //   The highest tide to be displayed (feet above MLLW)
-  tc_scale_t clockFace;                               //   The type of clock face; linear or nonlinear
+  tc_scale_t clockFace;                               //   The type of clock face; tcLinear or tcNonlinear
+  tc_motor_t motor;                                   //   The type of lavet motor; tcOne or tcSixteen
 };
 enum opMode_t : uint8_t {notInit, run, test};         // The opMode type
 
@@ -110,7 +111,9 @@ UserInput ui {};                                      // User interface object -
 float predWl[TAT_N_PRED_WL];                          // The today's predicted water levels, every six minutes from 00:00 to 24:00
 configData_t config;                                  // The configuration data stored in NVS
 opMode_t opMode;                                      // Whether we're running normally or doing adjustments
-bool testTicking = false;                             // In test mode, whether the clock is ticking
+uint16_t testTick;                                    // In test mode, the number of ticks to run the clock
+uint16_t testNsecs;                                   // In test mode, how many seconds between ticks
+uint16_t testTicksTaken;                              // In test mode, how many ticks are have been taken
 
 /***
  * 
@@ -212,15 +215,17 @@ void blinkLED(uint8_t n = 1) {
  * @return String The string representation of c
  */
 String configToString(configData_t c) {
-  char buffer[180];
+  char buffer[200];
   sprintf(buffer, "Configuration: \n"
                   "  ssid:     \'%s\'\n"
                   "  pw:       \'%s\'\n"
                   "  station:  \'%s\'\n"
                   "  minLevel: %f\n"
                   "  maxLevel: %f\n"
-                  "  face:     %s\n",
-                  c.ssid, c.pw, c.station, c.minLevel, c.maxLevel, c.clockFace == linear ? "linear" : "nonlinear");
+                  "  face:     %s\n"
+                  "  motor:    %s\n",
+                  c.ssid, c.pw, c.station, c.minLevel, c.maxLevel, 
+                  c.clockFace == tcLinear ? "linear" : "nonlinear", c.motor == tcOne ? "one" : "sixteen");
   return String(buffer);
 }
 
@@ -541,10 +546,10 @@ void onHelp() {
   Serial.print(
     "help | h                       Print this summary of the commands\n"
     "mode run | test                Set the operating mode: run normally or enter test mode\n"
-    "setwl <float>                  In test mode, set the displayed water level (ft MLLW)\n"
-    "tick [on | off]                In test mode, start, stop or toggle ticking the clock\n"
+    "tick nTicks [nSecs]            In test mode, tick the clock for nTicks, once every nSecs seconds\n"
     "tide                           Print information about the next high or low tide\n"
     "wl                             Print information about the current water level\n"
+    "wl <float>                     In test mode, set the displayed water level (ft MLLW)\n"
     "config                         Print the current configuration\n"
     "config ssid  <string>          Set the WiFi ssid to use to <string>\n"
     "config pw <string>             Set the WiFi password to use to <string>\n"
@@ -552,6 +557,7 @@ void onHelp() {
     "config minlevel <float>        Set the minimum displayable water level (ft MLLW)\n"
     "config maxlevel <float>        Set the maximum displayable water level (ft MLLW)\n"
     "config face linear | nonlinear Set the type of clock face being used\n"
+    "config motor one | sixteen     Set the type of motor the clock uses\n"
     "save                           Save the current configuration\n"
     "restart                        Restart things using the saved configuration\n");
 }
@@ -560,8 +566,6 @@ void onHelp() {
  * @brief The mode command handler. Set the mode either to "run" or "test." During run mode, 
  *        the clock and the tide display run normally. During test mode neither runs and the
  *        setwl and tick commands become active.tick
- * tick
- * tick
  * 
  */
 void onMode() {
@@ -571,25 +575,11 @@ void onMode() {
     opMode = run;
     Serial.print(F("Run mode.\n"));
   } else if (modeName.equalsIgnoreCase("test")) {
-    Serial.print(F("Test mode. Water level display not running.\n"));
+    Serial.print(F("Test mode. Displays not running.\n"));
     opMode = test;
   } else {
     Serial.printf("Unrecognized mode: %s.\n", ui.getWord(1).c_str());
   }
-}
-
-/**
- * @brief The setwl command handler. Set the water level display to show the 
- *        given value (in feet above/below MLLW)
- */
-void onSetWl() {
-  if (opMode != test) {
-    Serial.print(F("setwl command only active in test mode.\n"));
-    return;
-  }
-  float wl = ui.getWord(1).toFloat();
-  wld.setLevel(wl);
-  Serial.printf("Water level display set to %f\n", wl);
 }
 
 /**
@@ -599,19 +589,16 @@ void onSetWl() {
  */
 void onTick() {
   if (opMode != test) {
-    Serial.print(F("tick command only active in test mode.\n"));
+    Serial.print(F("The tick command is only active in test mode.\n"));
     return;
   }
-  String cmd = ui.getWord(1);
-  if (cmd.length() == 0) {
-    testTicking = !testTicking;
-  } else if (cmd.equalsIgnoreCase("on")) {
-    testTicking = true;
-  } else if (cmd.equalsIgnoreCase("off")) {
-    testTicking = false;
-  } else {
-    Serial.printf("Tick can't be %s. Needs to be empty, 'on' or 'off'.\n");
+  testTick = ui.getWord(1).toInt();
+  testNsecs = ui.getWord(2).toInt();
+  if (testNsecs < 1) {
+    testNsecs = 6;
   }
+  Serial.printf("Ticking %d times at 1 tick every %d seconds.\n", testTick, testNsecs);
+  testTicksTaken = 0;
 }
 
 /**
@@ -631,13 +618,25 @@ void onTide() {
 }
 
 /**
- * @brief The wl command handler. Display information about the current water level
+ * @brief The wl command handler. Display information about the current water level or,
+ *        in test mode, set the water level being displayed.
  * 
  */
 void onWl() {
+  String wlString = ui.getWord(1);
   time_t t = time(nullptr);
-  Serial.printf("It is now %s UTC. The water level currently displayed is %f feet MLLW.\n", 
-    toHhmmss(t).c_str(), wld.getLevel());
+  if (wlString.length() == 0) {
+    Serial.printf("It is now %s UTC. The water level currently displayed is %f feet MLLW.\n", 
+      toHhmmss(t).c_str(), wld.getLevel());
+      return;
+  }    
+  if (opMode != test) {
+    Serial.print(F("Can only set the water level in test mode.\n"));
+    return;
+  }
+  float wl = wlString.toFloat();
+  wld.setLevel(wl);
+  Serial.printf("Water level display set to %f\n", wl);
 }
 
 /**
@@ -688,13 +687,26 @@ void onConfig() {
   if (subCmd.equalsIgnoreCase("face")) {
     String faceType = ui.getWord(2);
     if (faceType.equalsIgnoreCase("linear")) {
-      config.clockFace = linear;
+      config.clockFace = tcLinear;
     } else if (faceType.equalsIgnoreCase("nonlinear")) {
-      config.clockFace = nonlinear;
+      config.clockFace = tcNonlinear;
     } else {
       Serial.printf("Invalid face type. \"%s\". Must be \"linear\" or \"nonlinear\".\n",
         faceType);
     }
+    return;
+  }
+  if (subCmd.equalsIgnoreCase("motor")) {
+    String motorType = ui.getWord(2);
+    if (motorType.equalsIgnoreCase("one")) {
+      config.motor = tcOne;
+    } else if (motorType.equalsIgnoreCase("sixteen")) {
+      config.motor = tcSixteen;
+    } else {
+      Serial.printf("Invalid motor type. \"%s\". Must be \"one\" or \"sixteen\".\n",
+        motorType);
+    }
+    return;
   }
   Serial.printf("Unrecognized configuration variable \'%s\'.\n", subCmd.c_str());
 }
@@ -736,7 +748,6 @@ void setup() {
     ui.attachCmdHandler("help", onHelp) &&
     ui.attachCmdHandler("h", onHelp) &&
     ui.attachCmdHandler("mode", onMode) &&
-    ui.attachCmdHandler("setwl", onSetWl) &&
     ui.attachCmdHandler("tide", onTide) &&
     ui.attachCmdHandler("wl", onWl) &&
     ui.attachCmdHandler("config", onConfig) &&
@@ -752,7 +763,7 @@ void setup() {
     if(connectWiFi(config.ssid, config.pw)) {
       setClock();
       wld.begin(config.minLevel, config.maxLevel);
-      tc.begin(getNextTide, config.clockFace);
+      tc.begin(getNextTide, config.clockFace, config.motor);
       opMode = run;
     }
   }
@@ -775,10 +786,28 @@ void loop() {
   time_t curTime = time(nullptr);
   uint32_t curGmToD = timeToTimeOfDayUTC(curTime);
 
+  // Deal with test mode
   if (opMode == test) {
-    if (testTicking) {
-      tc.test();
-    }    
+    static uint32_t stepsToTick = 0;
+    static unsigned long lastTickMillis = 0;
+    unsigned long curMillis = millis();
+    // Take a step towards taking testTeck ticks
+    if (testTick > testTicksTaken && curMillis - lastTickMillis >= testNsecs * 1000) {
+      if (tc.test()) {
+        stepsToTick++;
+      }
+      if (stepsToTick >= (config.motor == tcOne ? TC_ONE_STEPS_PER_TICK : TC_SIXTEEN_STEPS_PER_TICK)) {
+        stepsToTick = 0;
+        testTicksTaken++;
+        lastTickMillis = curMillis;
+      }
+      if (testTicksTaken >= testTick) {
+        testTick = 0;
+        testTicksTaken = 0;
+        Serial.print("Tick test complete.\n");
+      }
+    }
+  // Otherwise deal with run mode
   } else {
     if (opMode != notInit) {                                        // If initialized
 
