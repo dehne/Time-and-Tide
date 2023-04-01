@@ -1,5 +1,5 @@
 /****
- * Time and Tides v0.5.0
+ * Time and Tides v0.5.1
  * 
  * This is the Arduino framework firmware for a device with a tide clock and a water level 
  * display. It uses a WiFi connection to the internet to ask the noaa.gov tides and currents 
@@ -65,7 +65,7 @@
 #include "WlDisplay.h"                                // Water level display object
 
 // Misc constants
-#define BANNER                  F("Time and Tides v0.5.0")
+#define BANNER                  F("Time and Tides v0.5.1")
 #define MAX_SERIAL_READY_MILLIS (10000)               // Maximum millis to wait for Serial to become ready
 #define SECONDS_IN_NOMINAL_TIDE ((6*60+12)*60+30)     // Nominal time between high and low tide (sec)
 #define SECONDS_PER_DAY         (86400)               // How many seconds there are in a day
@@ -117,13 +117,19 @@ uint16_t testTicksTaken;                              // In test mode, how many 
 
 /***
  * 
- * Set the system clock to the current local time and date using an NTP server.
+ * Set the system clock to the current local time and date using an NTP server. Doing this 
+ * also causes the ESP SNTP library to sync the system time using NTP every hour see
+ * https://techtutorialsx.com/2021/09/03/esp32-sntp-additional-features/#Setting_the_SNTP_sync_interval
+ * for details of an expreiment. 
+ * 
+ * Since we only deal with time to the one second level, one hour synchronization should not cause time()
+ * to appear to go backwards.
  * 
  * "Local time" is defined by the constant POSIX_TZ
  * 
  ***/
 void setClock() {
-  configTime(0, 0, TAT_NTP_SERVER);
+  configTzTime(TAT_POSIX_TZ, TAT_NTP_SERVER);
 
   Serial.print(F("Waiting for NTP time sync..."));
   time_t nowSecs = time(nullptr);
@@ -133,9 +139,6 @@ void setClock() {
     yield();
     nowSecs = time(nullptr);
   }
-
-  setenv("TZ", TAT_POSIX_TZ, 1);
-  tzset();
   Serial.printf("Sync successful. Current time: %s", ctime(&nowSecs));
 }
 
@@ -781,7 +784,6 @@ void setup() {
  * @brief Arduino loop() function. Execute repeatedly after setup() completes.
  */
 void loop() {
-  static bool needToSetClock = false;
   static time_t lastWlTime = 0;
   time_t curTime = time(nullptr);
   uint32_t curGmToD = timeToTimeOfDayUTC(curTime);
@@ -810,15 +812,6 @@ void loop() {
   // Otherwise deal with run mode
   } else {
     if (opMode != notInit) {                                        // If initialized
-
-      // Use NTP to set our internal clock once a day
-      uint32_t curTimeOfDayUTC = timeToTimeOfDayUTC(curTime);
-      if (needToSetClock && curTimeOfDayUTC >= TAT_SET_CLOCK_UTC_SECS) {
-        setClock();
-        needToSetClock = false;
-      } else if (curTimeOfDayUTC < TAT_SET_CLOCK_UTC_SECS) {
-        needToSetClock = true;
-      }
 
       // If we're updating the water level display and enough time has passed, do the update
       if (curTime - lastWlTime >= TAT_LEVEL_CHECK_SECS) {
