@@ -1,5 +1,6 @@
 {
     "files.associations": {
-        "tcpip_adapter.h": "c"
+        "tcpip_adapter.h": "c",
+        "sntp.h": "c"
     }
 }

@@ -1,7 +1,7 @@
 /****
  *
  * TideClock.cpp
- * Part of the "TideClock" library for Arduino. Version 0.6.0
+ * Part of the "TideClock" library for Arduino. Version 0.6.1
  *
  * See tideClock.h for details
  *
@@ -50,7 +50,7 @@ void TideClock::begin(getNextTideHandler_t h, tc_scale_t type, tc_motor_t motor)
   Serial.printf("[TideClock::begin] Using %s clock face with type %s motor.\n", 
     faceType == tcLinear ? "linear" : "nonlinear", motorType == tcOne ? "one" : "sixteen");
   lastMillis = millis();
-  gotTideMillis = 0;
+  gotTideMillis = lastMillis - TC_ASK_TIDE_MILLIS;
 }
 
 /***

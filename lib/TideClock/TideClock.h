@@ -1,7 +1,7 @@
 /****
  *
  *  TideClock.h
- *  Part of the "TideClock" library for Arduino. Version 0.6.0
+ *  Part of the "TideClock" library for Arduino. Version 0.6.1
  *
  * The TideClock class uses a hacked Lavet motor quartz clock movement -- one of the ubiquitous, cheap
  * quartz mechanisms powered by a single AA cell to display the number of hours to the next tide. It 
