@@ -63,31 +63,38 @@ void TideClock::run(time_t t) {
     return;
   }
   lastMillis = curMillis;
-  bool firstPass = nextTide.time == 0;
+  // If steps are needed, take one
+  if (stepsNeeded > stepsTaken) {
+    step();
+    stepsTaken++;
+    return;
+  }
+  
+  // All caught up. Figure out what's next
+  bool firstPass = nextTide.time == 0;            // Whether we're just starting
+  bool startingNewCycle = false;                  // Whether we're starting a new tide cycle
+  bool missedCycle = false;                       // Whether clock showing wrong cycle phase. E.g., high instead of low
 
-  bool startingNewCycle = false;
-  bool missedCycle = false;
   // If we're past the time of the next tide, deal with it
   if (t > nextTide.time) {
     if (curMillis - gotTideMillis < TC_ASK_TIDE_MILLIS) {
-      return;                                     // Don't ask about the tide too often
+      return;                                     // Don't try to get the new tide data too often
     }
+    // Get the new tide data
     tc_tide_t newTide = (*handler)();
     gotTideMillis = curMillis;
-    // If that didn't work, give up for now
     if (newTide.tideType == TC_UNAVAILABLE) {
       return;
     }
-    missedCycle = nextTide.tideType == newTide.tideType;  // If it looks like two same tides in row we missed a cycle
-    nextTide = newTide;
+    // Set up to start a new tide cycle
+    missedCycle = nextTide.tideType == newTide.tideType;
+    nextTide = newTide;                            
     startingNewCycle = true;
     stepsTaken = 0;
   }
-
-  // Calculate the relevant quantities
+  // Calculate the new value for stepsNeeded
   int32_t secToNextTide = static_cast<int32_t>(nextTide.time - t);
   float secFromCycleEnd;
-  int32_t stepsNeeded;
   if (faceType == tcNonlinear) {
     secFromCycleEnd = static_cast<float>(TC_SECONDS_IN_18_HOURS - secToNextTide);
     stepsNeeded = stepsPerTick * static_cast<int32_t>(TC_A_COEFFICIENT * (secFromCycleEnd * secFromCycleEnd));
@@ -96,7 +103,7 @@ void TideClock::run(time_t t) {
     stepsNeeded = stepsPerTick * static_cast<int32_t>(secFromCycleEnd / TC_SECONDS_PER_TICK);
   }
   
-  // If we're starting a new cycle, do the initializaton for it
+  // Deal with starting a new tide cycle
   if (startingNewCycle) {
     if (missedCycle) {
       stepsNeeded += stepsPerTick * TC_TICKS_IN_A_CYCLE;
@@ -126,12 +133,6 @@ void TideClock::run(time_t t) {
         posixTimeToHHMMSS(t).c_str(), secToHHMMSS(secToNextTide).c_str(), secToNextTide);
       paused = false;
     }
-    return;
-  }
-  // If steps are needed, take one
-  if (stepsNeeded > stepsTaken) {
-    step();
-    stepsTaken++;
   }
 }
 

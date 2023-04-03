@@ -173,6 +173,7 @@ unsigned long stepsPerTick;             // The number of steps per tick for our 
 unsigned long minStepInterval;          // The minimum step interval for our motor (millis())
 uint32_t pulseDuration;                 // How long the step pulse is for our motor (millis())
 int32_t stepsTaken;                     // The number of steps taken by the clock since the last tide
+int32_t stepsNeeded;                    // Number of steps since the last tide needed to indicate correctly
 tc_tide_t nextTide;                     // The next tide event
 unsigned long gotTideMillis;            // millis() at the time we last asked for the next tide prediction
 unsigned long lastMillis;               // millis() the last time step() or test() was invoked
