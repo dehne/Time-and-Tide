@@ -116,7 +116,7 @@ void TideClock::run(time_t t) {
       paused = true;
     } else {
       if (firstPass) {
-        Serial.printf("[TideClock::run %s] The tide (%s) is %s away. Check that the clock is set correctly.\n",
+        Serial.printf("[TideClock::run %s] The next tide (%s) is %s away. Check that the clock is set correctly.\n",
         posixTimeToHHMMSS(t).c_str(), highOrLow, secToHHMMSS(secToNextTide).c_str());
         stepsTaken = stepsNeeded;       // Assume clock is set correctly.
       } else {

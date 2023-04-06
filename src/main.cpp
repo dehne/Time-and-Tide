@@ -59,7 +59,7 @@
 #include <UserInput.h>
 #include <nvs_flash.h>
 #include <nvs.h>
-
+#include <esp_sntp.h>
 #include "config.h"                                   // Configuration definitions
 #include "TideClock.h"                                // Tide clock object
 #include "WlDisplay.h"                                // Water level display object
@@ -127,19 +127,27 @@ uint16_t testTicksTaken;                              // In test mode, how many 
  * 
  * "Local time" is defined by the constant POSIX_TZ
  * 
+ * @return true   Time set successfully
+ * @return false  Unable to set the time. Don't trust the system time
+ * 
  ***/
-void setClock() {
+bool setClock() {
   configTzTime(TAT_POSIX_TZ, TAT_NTP_SERVER);
 
   Serial.print(F("Waiting for NTP time sync..."));
-  time_t nowSecs = time(nullptr);
-  while (nowSecs < 8 * 3600 * 2) {
-    delay(500);
-    Serial.print(F("."));
-    yield();
-    nowSecs = time(nullptr);
+  sntp_sync_status_t status;
+  for (uint8_t i = 0; i < (TAT_NTP_WAIT_MILLIS / TAT_NTP_CHECK_MILLIS) && (status = sntp_get_sync_status()) != SNTP_SYNC_STATUS_COMPLETED; i++) {
+    delay(TAT_NTP_CHECK_MILLIS);
+    Serial.print(".");
   }
-  Serial.printf("Sync successful. Current time: %s", ctime(&nowSecs));
+  if (status != SNTP_SYNC_STATUS_COMPLETED) {
+    Serial.printf("sync not successful: %d\n", 
+      status == SNTP_SYNC_STATUS_RESET ? "reset" : status == SNTP_SYNC_STATUS_IN_PROGRESS ? "in progress" : "completed");
+      return false;
+  }
+  time_t nowSecs = time(nullptr);
+  Serial.printf("Sync successful. Current time: %s", ctime(&nowSecs)); // ctime() appends a "\n", just because.
+  return true;
 }
 
 /***
@@ -377,8 +385,7 @@ tc_tide_t getNextTide() {
       if(sz > 0) {
         log_d("[getNextTide %s] Got %d tide predictions: ", timeStamp.c_str(), sz);
         for (uint8_t ix = 0; ix < sz; ix++) {
-          log_d("%s", predictions["predictions"][ix]["t"].as<String>().c_str());
-          log_d("%s", ix < sz -1 ? ", " : "\n");
+          log_d("%s%s", predictions["predictions"][ix]["t"].as<String>().c_str(), ix < sz -1 ? ", " : "\n");
         }
         for (uint8_t ix = 0; ix < sz; ix++) {
           answer.time = fromNOAAformat(predictions["predictions"][ix]["t"].as<String>());
@@ -407,8 +414,8 @@ tc_tide_t getNextTide() {
   } else {
     uint32_t fromNow = (uint32_t)(answer.time - nowSecs);
     Serial.printf("[getNextTide %s] Next tide (%s) is %02d:%02d:%02d from now at %s\n", 
-      timeStamp.c_str(), answer.tideType == HIGH ? "High" : "Low", 
-      fromNow / 3600, (fromNow % 3600) / 60, fromNow % 60, toNOAAformat(answer.time).c_str());
+      timeStamp.c_str(), answer.tideType == HIGH ? "high" : "low", 
+      fromNow / 3600, (fromNow % 3600) / 60, fromNow % 60, toHhmmss(answer.time).c_str());
   }
   return answer;
 }
@@ -616,8 +623,8 @@ void onTide() {
     return;
   }
   int32_t secToNextTide = static_cast<int32_t>(nextTide.time) - static_cast<int32_t>(t);
-  Serial.printf("The next tide (%s) is at %s, %s (%d seconds) from now.\n",
-    nextTide.tideType == HIGH ? "High" : "Low", toHhmmss(nextTide.time).c_str(), toHhmmss(secToNextTide).c_str(), secToNextTide);
+  Serial.printf("The next tide (%s) is %s from now at %s.\n",
+    nextTide.tideType == HIGH ? "high" : "low", toHhmmss(secToNextTide).c_str(), toHhmmss(nextTide.time).c_str());
 }
 
 /**
@@ -764,20 +771,21 @@ void setup() {
   opMode = notInit;
   if (getConfig()) {
     if(connectWiFi(config.ssid, config.pw)) {
-      setClock();
+      if(setClock()) {
+        opMode = run;
+      }
       wld.begin(config.minLevel, config.maxLevel);
       tc.begin(getNextTide, config.clockFace, config.motor);
-      opMode = run;
     }
   }
 
   // Say how that worked out.
   if (opMode == run) {
-    Serial.print("Running normally.\n");
+    Serial.print("All set to run normally. Just need NOAA's cooperation.\n");
   } else {
-    Serial.print("Unable to start using the current configuration.\n");
+    Serial.print("Unable to start normally. Hopefully the reason is obvious.\n");
   }
-  Serial.print(F("Type h or help for a list of commands.\n\n"));
+  Serial.print(F("Type h or help for a list of commands.\n"));
 }
 
 /**

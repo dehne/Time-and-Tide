@@ -41,15 +41,16 @@
 // The NTP server to use to set the time
 #define TAT_NTP_SERVER          "pool.ntp.org"
 
+// How long to wait for the NTP server to respond before declaring failure
+#define TAT_NTP_WAIT_MILLIS     (20000)
+#define TAT_NTP_CHECK_MILLIS    (500)
+
 // The definition of "local" time in Posix TZ format. This must match the timezone asked for in 
-// the requests to NOAA.
+// the requests to NOAA. Probably best not to change this.
 // See https://www.gnu.org/software/libc/manual/html_node/TZ-Variable.html for format definition.
 // See https://en.wikipedia.org/wiki/List_of_tz_database_time_zones for list of timezones. 
 // NB: The UTC offset in the wikipedia list has the opposite sign from the Posix TZ format.
 #define TAT_POSIX_TZ            "GMT+0"
-
-// When, in seconds past midnight UTC, we set the system clock via NTP each day (Don't choose midnight!)
-#define TAT_SET_CLOCK_UTC_SECS  (10 * 60 * 60)
 
 // How often to update the water level display (sec)
 #define TAT_LEVEL_CHECK_SECS    (360)
@@ -164,7 +165,7 @@
 // the desired station in the form "&station=ddddddd" where "ddddddd" is the 7-digit NOAA station ID
 #define TAT_GET_PRED_TIDES      "application=David_Ehnebuske&units=english&"\
                                 "time_zone=gmt&datum=MLLW&format=json&"\
-                                "product=predictions&interval=hilo&range=36&begin_date="
+                                "product=predictions&interval=hilo&range=48&begin_date="
 
 // Capacity required for the JsonDocument we'll use to deserialize the result of the above request
 #define TAT_JSON_CAPACITY_TIDES (768)
