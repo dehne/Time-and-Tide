@@ -20,9 +20,9 @@
  * It's HIGH when power is present.
  * 
  * When USB power comes up, the display has no idea where it is in its range except that the water 
- * level is is displaying is at or above the minimum physically displayable level. To figure out 
+ * level it is displaying is at or above the minimum physically displayable level. To figure out 
  * where it is, the device contains a magnet that moves as the displayed water level changes and 
- * a 3144 Hall-effect sensor that gets near the sensor at the physical position corresponding to 
+ * a 3144 Hall-effect sensor that gets near the magnet at the physical position corresponding to 
  * the minimum displayable water level. To home the device, we drive the stepper down (which, it 
  * turns out, is clockwise) until the Hall-effect sensor trips.
  * 

@@ -6,7 +6,7 @@
  * The TideClock class uses a hacked Lavet motor quartz clock movement -- one of the ubiquitous, cheap
  * quartz mechanisms powered by a single AA cell to display the number of hours to the next tide. It 
  * assumes the movement has been modified by connecting the two ends of its coil to two pins, tickPin 
- * and tockPin, of an microprocessor running Arduino framework-based firmware. 
+ * and tockPin, of a microprocessor running Arduino framework-based firmware. 
  * 
  * A clock hacked in this way can be advanced by alternating pulses on the two pins. Each pulse 
  * advances the clock mechanism by one step. I've found two versions of the mechanism. You can tell 
@@ -19,8 +19,8 @@
  * a test program I'm using to try to find a set of timing parameters that works, but so far it's 
  * been "close but no cigar." Worse, after stopping, I've seen them end up part way between steps and 
  * completely refuse to start again without bumping them. Tiny forces and odd mechanical resonances. 
- * For now, at least it's best to stick with clocks that use type tcOne motors which are designed to 
- * run intermittantly.
+ * For now, at least stick with clocks that use type tcOne motors which are designed to run 
+ * intermittantly.
  * 
  * TideClock supports two alternative clock face designs. The first, called the linear design, has 
  * traditional tide clock markings and one hand: straight up is high tide and straight down is low 

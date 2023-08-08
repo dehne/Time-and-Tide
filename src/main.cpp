@@ -141,7 +141,7 @@ bool setClock() {
     Serial.print(".");
   }
   if (status != SNTP_SYNC_STATUS_COMPLETED) {
-    Serial.printf("sync not successful: %d\n", 
+    Serial.printf("sync not successful: %s\n", 
       status == SNTP_SYNC_STATUS_RESET ? "reset" : status == SNTP_SYNC_STATUS_IN_PROGRESS ? "in progress" : "completed");
       return false;
   }
@@ -248,7 +248,7 @@ String configToString(configData_t c) {
  * with the server, i.e. gone through the setCACert() process.
  * 
  * @param   (const char *) url: The url to use for the request
- * @return  (String) The payload from the server
+ * @return  (String) The payload from the server; empty String on error
  * 
  */
 String getPayload(const char *url) {
@@ -271,7 +271,8 @@ String getPayload(const char *url) {
           Serial.printf("[getPayload] Request URL was: %s\n", url);
         }
       } else {
-        Serial.printf("[getPayload] HTTPS GET failed, error: %s\n", https.errorToString(httpCode).c_str());
+        Serial.printf("[getPayload] HTTPS GET failed, error: '%s'. WiFi status: %d\n", 
+          https.errorToString(httpCode).c_str(), WiFi.status());
       }
       https.end();
     } else {
@@ -593,8 +594,12 @@ void onMode() {
 }
 
 /**
- * @brief The tick command handler. Test mode only. Start, stop or toggle the tide 
- *        clock mechanism ticking once per second.
+ * @brief The tick command handler. Test mode only. 
+ * 
+ *        tick <n> [<r>]
+ * 
+ *        Make the clock take <n> steps, one step every <r> seconds.
+ *        <r> defaults to 6
  * 
  */
 void onTick() {
@@ -817,9 +822,9 @@ void loop() {
         Serial.print("Tick test complete.\n");
       }
     }
-  // Otherwise deal with run mode
+  // Otherwise deal with run and not initialized modes
   } else {
-    if (opMode != notInit) {                                        // If initialized
+    if (opMode != notInit) {
 
       // If we're updating the water level display and enough time has passed, do the update
       if (curTime - lastWlTime >= TAT_LEVEL_CHECK_SECS) {

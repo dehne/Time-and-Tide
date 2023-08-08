@@ -2,5 +2,6 @@
     "files.associations": {
         "tcpip_adapter.h": "c",
         "sntp.h": "c"
-    }
+    },
+    "cmake.sourceDirectory": "${workspaceFolder}/.pio/libdeps/esp32cam/ArduinoJson"
 }
