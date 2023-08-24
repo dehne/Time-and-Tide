@@ -252,7 +252,7 @@ String configToString(configData_t c) {
  * 
  */
 String getPayload(const char *url) {
-  log_d("[getPayload] Request: \"%s\"", url);
+  log_d("[getPayload] Request: \"%s\"\r", url);
   String answer = "";
   HTTPClient https;
   WiFiClientSecure *client = new WiFiClientSecure; // Try to make a new client
